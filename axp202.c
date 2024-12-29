@@ -62,10 +62,8 @@ axp202_err_t axp202_init(const axp202_t *axp)
     while (init_commands[cmd].count != 0xff) {
         status = axp->write(
             axp->handle,
-            AXP202_ADDRESS,
-            init_commands[cmd].command,
-            init_commands[cmd].data,
-            init_commands[cmd].count & 0x1f
+            (uint8_t *)&init_commands[cmd],
+            (init_commands[cmd].count+1) & 0x1f
         );
         if (AXP202_OK != status) {
             return status;
@@ -141,7 +139,7 @@ axp202_err_t axp202_read(const axp202_t *axp, uint8_t reg, float *buffer)
         break;
     }
 
-    status = axp->read(axp->handle, AXP202_ADDRESS, reg, tmp, 2);
+    status = axp->read(axp->handle, reg, tmp, 2);
     if (AXP202_OK != status) {
         return status;
     }
@@ -153,38 +151,41 @@ axp202_err_t axp202_read(const axp202_t *axp, uint8_t reg, float *buffer)
 axp202_err_t axp202_ioctl(const axp202_t *axp, uint16_t command, uint8_t *buffer)
 {
     uint8_t reg = command >> 8;
-    uint8_t tmp;
+    //uint8_t tmp;
+    uint8_t data[] = { reg, 0 };
 
     switch (command) {
     case AXP202_READ_POWER_STATUS:
     case AXP202_READ_CHARGE_STATUS:
-        return axp->read(axp->handle, AXP202_ADDRESS, reg, buffer, 1);
+        return axp->read(axp->handle, reg, buffer, 1);
         break;
     case AXP202_COULOMB_COUNTER_ENABLE:
-        tmp = 0b10000000;
-        return axp->write(axp->handle, AXP202_ADDRESS, reg, &tmp, 1);
+        data[1] = 0b10000000;
+        return axp->write(axp->handle, data, 2);
         break;
     case AXP202_COULOMB_COUNTER_DISABLE:
-        tmp = 0b00000000;
-        return axp->write(axp->handle, AXP202_ADDRESS, reg, &tmp, 1);
+        data[1] = 0b00000000;
+        return axp->write(axp->handle, data, 2);
         break;
     case AXP202_COULOMB_COUNTER_SUSPEND:
-        tmp = 0b11000000;
-        return axp->write(axp->handle, AXP202_ADDRESS, reg, &tmp, 1);
+        data[1] = 0b11000000;
+        return axp->write(axp->handle, data, 2);
         break;
     case AXP202_COULOMB_COUNTER_CLEAR:
-        tmp = 0b10100000;
-        return axp->write(axp->handle, AXP202_ADDRESS, reg, &tmp, 1);
+        data[1] = 0b10100000;
+        return axp->write(axp->handle, data, 2);
         break;
     case AXP202_READ_CONTROL:
-        return axp->read(axp->handle, AXP202_ADDRESS, reg, buffer, 1);
+        return axp->read(axp->handle, reg, buffer, 1);
         break;
     case AXP202_WRITE_CONTROL:
-        return axp->write(axp->handle, AXP202_ADDRESS, reg, buffer, 1);
+        return axp->write(axp->handle, &reg, 1);
         break;
     case AXP202_IRQ_CONTROL:
         for (int i = 0; i < AXP202_IRQ_REG_NUM; i++) {
-            axp202_err_t res = axp->write(axp->handle, AXP202_ADDRESS, reg + i, buffer + i, 1);
+            data[0] = reg + i;
+            data[1] = *(buffer + i);
+            axp202_err_t res = axp->write(axp->handle, data, 2);
             if (res != AXP202_OK) {
                 return res;
             }
@@ -193,7 +194,7 @@ axp202_err_t axp202_ioctl(const axp202_t *axp, uint16_t command, uint8_t *buffer
         break;
     case AXP202_IRQ_READ_CONTROL:
         for (int i = 0; i < AXP202_IRQ_REG_NUM; i++) {
-            axp202_err_t res = axp->read(axp->handle, AXP202_ADDRESS, reg + i, buffer + i, 1);
+            axp202_err_t res = axp->read(axp->handle, reg + i, buffer + i, 1);
             if (res != AXP202_OK) {
                 return res;
             }
@@ -202,7 +203,7 @@ axp202_err_t axp202_ioctl(const axp202_t *axp, uint16_t command, uint8_t *buffer
         break;
     case AXP202_IRQ_READ_STATUS:
         for (int i = 0; i < AXP202_IRQ_REG_NUM; i++) {
-            axp202_err_t res = axp->read(axp->handle, AXP202_ADDRESS, reg + i, buffer + i, 1);
+            axp202_err_t res = axp->read(axp->handle, reg + i, buffer + i, 1);
             if (res != AXP202_OK) {
                 return res;
             }
@@ -212,7 +213,9 @@ axp202_err_t axp202_ioctl(const axp202_t *axp, uint16_t command, uint8_t *buffer
     case AXP202_IRQ_CLEAR_STATUS:
         for (int i = 0; i < AXP202_IRQ_REG_NUM; i++) {
             uint8_t status = 0xff; // 1 for each bit to reset
-            axp202_err_t res = axp->write(axp->handle, AXP202_ADDRESS, reg + i, &status, 1);
+            data[0] = reg + i;
+            data[1] = status;
+            axp202_err_t res = axp->write(axp->handle, data, 2);
             if (res != AXP202_OK) {
                 return res;
             }
@@ -230,13 +233,13 @@ static axp202_err_t read_coloumb_counter(const axp202_t *axp, float *buffer)
     int32_t coin, coout;
     axp202_err_t status;
 
-    status = axp->read(axp->handle, AXP202_ADDRESS, AXP202_CHARGE_COULOMB, tmp, sizeof(coin));
+    status = axp->read(axp->handle, AXP202_CHARGE_COULOMB, tmp, sizeof(coin));
     if (AXP202_OK != status) {
         return status;
     }
     coin = (tmp[0] << 24) + (tmp[1] << 16) + (tmp[2] << 8) + tmp[3];
 
-    status = axp->read(axp->handle, AXP202_ADDRESS, AXP202_DISCHARGE_COULOMB, tmp, sizeof(coout));
+    status = axp->read(axp->handle, AXP202_DISCHARGE_COULOMB, tmp, sizeof(coout));
     if (AXP202_OK != status) {
         return status;
     }
@@ -256,7 +259,7 @@ static axp202_err_t read_battery_power(const axp202_t *axp, float *buffer)
 
     /* 2 * 1.1mV * 0.5mA per LSB */
     sensitivity = 2 * 1.1 * 0.5 / 1000;
-    status = axp->read(axp->handle, AXP202_ADDRESS, AXP202_BATTERY_POWER, tmp, 3);
+    status = axp->read(axp->handle, AXP202_BATTERY_POWER, tmp, 3);
     if (AXP202_OK != status) {
         return status;
     }
@@ -269,7 +272,7 @@ static axp202_err_t read_fuel_gauge(const axp202_t *axp, float *buffer)
     axp202_err_t status;
     uint8_t tmp;
 
-    status = axp->read(axp->handle, AXP202_ADDRESS, AXP202_FUEL_GAUGE, &tmp, 1);
+    status = axp->read(axp->handle, AXP202_FUEL_GAUGE, &tmp, 1);
     if (AXP202_OK != status) {
         return status;
     }
